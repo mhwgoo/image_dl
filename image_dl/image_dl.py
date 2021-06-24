@@ -14,14 +14,20 @@ from utils import parse_args, get_urls, get_download_dir, get_formats
 
 logger = logging.getLogger("image_dl")
 
+import socks
+import socket
+
+socks.set_default_proxy(socks.PROXY_TYPE_SOCKS5, "127.0.0.1", 1086)
+socket.socket = socks.socksocket
+
 
 async def fetch(url, session, formats):
     try:
         async with session.get(url) as response:
             logger.info("Got response [%s] for url: %s", response.status, url)
             res = await response.text()
-    except aiohttp.ClientError:
-        logger.error("aiohttp exception for %s", url)
+    except aiohttp.ClientError as e:
+        logger.error("aiohttp exception for %s", url, exc_info=e)
     except Exception:
         logger.exception("non-aiohttp exception occurred: %s", url)
 
@@ -35,7 +41,7 @@ async def parse_imgs(url, session, formats):
     response = await fetch(url, session, formats)
     lxml_element = etree.HTML(response)
     img_links = lxml_element.xpath(
-        "//img/@src" or "//img/@data-original" or "//a/@href" or "//a/@data-original"
+        "//img/@src | //img/@data-original | //a/@href | //a/@data-original"
     )
     img_list = []
     for link in img_links:
@@ -59,9 +65,13 @@ def process_dir(dl_dir):
         raise DirectoryCreateError
 
 
+# TODO: catch failed imgs
 async def save_img(dl_dir, link, session):
     process_dir(dl_dir)
-    img_path = os.path.join(dl_dir, link.split("/")[-1])
+    img_name = link.split("/")[-1]
+    if "?" in img_name:
+        img_name = img_name.split("?")[0]
+    img_path = os.path.join(dl_dir, img_name)
     async with aiofiles.open(img_path, "wb") as f:
         try:
             async with session.get(link) as response:
