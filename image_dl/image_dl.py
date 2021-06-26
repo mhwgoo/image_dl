@@ -6,8 +6,8 @@ import random
 import time
 import pathlib
 import requests
+import http.client
 import concurrent.futures
-from threading import Lock
 from lxml import etree
 from urllib.parse import urlparse, urljoin
 from fake_user_agent.main import user_agent
@@ -17,10 +17,11 @@ from utils import parse_args, get_url, get_download_dir
 from log import logger
 from exceptions import DirectoryAccessError, DirectoryCreateError
 
-# import socks
-# import socket
-# socks.set_default_proxy(socks.PROXY_TYPE_SOCKS5, "127.0.0.1", 1086)
-# socket.socket = socks.socksocket
+import socks
+import socket
+
+socks.set_default_proxy(socks.PROXY_TYPE_SOCKS5, "127.0.0.1", 1086)
+socket.socket = socks.socksocket
 
 ua = user_agent()
 headers = {"User-Agent": ua}
@@ -29,21 +30,21 @@ headers = {"User-Agent": ua}
 def fetch(url, session):
     try:
         with session.get(url, headers=headers) as r:
-            logger.info(
+            logger.debug(
                 "Got response [%s] for url: %s : returned url: %s",
                 r.status_code,
                 url,
                 r.url,
             )
             res = r.text
-    except requests.exceptions.MissingSchema:
-        logger.error("Invalid URL: %s", link)
+    except requests.exceptions.MissingSchema as e:
+        logger.error("%s when fetching %s", e.message, url)
         raise
-    except requests.exceptions.ConnectionError:
-        logger.error("Error occurred when fetching %s", url)
+    except requests.exceptions.ConnectionError as e:
+        logger.error("%s when fetching %s", e.message, url)
         raise
-    except Exception:
-        logger.error("Error occurred when fetching  %s", url)
+    except Exception as e:
+        logger.error("%s when fetching  %s", e.message, url, exc_info=True)
         raise
     else:
         return res
@@ -57,8 +58,14 @@ def fetch_js(url):
         driver.get(url)
         html = driver.page_source
         driver.quit()
-    except Exception:
-        logger.error("You are blocked by the web server of %s.", url, exc_info=True)
+    except http.client.RemoteDisconnected as e:
+        logger.error(
+            "Scraper is blocked by the web server of %s with error: %s", url, e.message
+        )
+        raise
+    except Exception as e:
+        logger.error("%s when fetching %s", e.message, url, exc_info=True)
+        raise
     else:
         return html
 
@@ -89,12 +96,12 @@ def parse_imgs(url, session, formats):
     response = fetch(url, session)
     img_list = parse(response, formats)
     if not img_list:
-        logger.info("No images found by 'fetch' in the webpage.")
+        logger.debug("No images found by 'fetch' in the webpage.")
         r = fetch_js(url)
         imgs = parse(r, formats)
         if not imgs:
-            logger.info("No images found by 'fetch_js' in the webpage.")
-            sys.exit()
+            logger.debug("No images found by 'fetch_js' in the webpage.")
+            sys.exit("Sorry, no images found in the webpage.")
         else:
             return imgs
     else:
@@ -114,34 +121,30 @@ def process_dir(dl_dir):
 def save_img(dl_dir, link, session, formats):
     process_dir(dl_dir)
     img_name = "_".join(link.split("/")[-2:])
-    # with Lock():
-    #    random_id = str(random.gauss(1, 1))
-    # img_name = random_id + "_" + link.split("/")[-1]
     if "?" in img_name:
         img_name = img_name.split("?")[0]
     if img_name.split(".")[-1] not in formats:
         img_name = img_name + ".jpg"
     img_path = os.path.join(dl_dir, img_name)
-
     with open(img_path, "wb") as f:
         try:
+            logger.debug("%s is starting to download", link)
             with session.get(link, headers=headers, stream=True) as r:
                 for chunk in r.iter_content(chunk_size=1024):
                     f.write(chunk)
-        except Exception:
-            logger.error("Error occurred when fetching  %s", link, exc_info=True)
+            logger.debug("%s done downloading", link)
+        except Exception as e:
+            logger.error("%s when fetching  %s", e.message, link, exc_info=True)
             pass
 
 
 def download_imgs(url, dl_dir, formats):
     with requests.Session() as session:
         img_list = parse_imgs(url, session, formats)
-        print("There are  %s image links", len(img_list))
+        logger.info("There are  %s image links", len(img_list))
         with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
             for link in img_list:
-                logger.info("%s is starting to download", link)
                 executor.submit(save_img, dl_dir, link, session, formats)
-                logger.info("%s done downloading", link)
 
 
 if __name__ == "__main__":
