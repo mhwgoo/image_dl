@@ -1,0 +1,21 @@
+[build-system]
+requires = ["flit_core >=2,<4"]
+build-backend = "flit_core.buildapi"
+
+[tool.flit.metadata]
+module = "image_dl"
+description-file = "README.md"
+author = "Kate Wang"
+author-email = "kate.wang2018@gmail.com"
+home-page = "https://github.com/KateWang2016/image_dl"
+classifiers = [ "License :: OSI Approved :: MIT License",]
+
+requires = ["lxml", "fake_user_agent", "requests"]
+
+requires-python = ">=3.7"
+
+keywords = "python, scraping, scraper, image, downloader"
+
+[tool.flit.scripts]
+image_dl = "image_dl.image_dl:main"
+
