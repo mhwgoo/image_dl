@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 from array import array
 from fcntl import ioctl
 
-from log import logger
+from .log import logger
 
 # ---terminal arguments---#
 def parse_args():
