@@ -1,3 +1,3 @@
-"Image Downloader downloads images on a webpage by multi-threading."
+"Image Downloader downloads images in a webpage by multi-threading."
 
-version = "0.0.1"
+__version__ = "0.0.1"

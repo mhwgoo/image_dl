@@ -3,7 +3,7 @@ requires = ["flit_core >=2,<4"]
 build-backend = "flit_core.buildapi"
 
 [tool.flit.metadata]
-module = "image_dl"
+module = "image_downloader"
 description-file = "README.md"
 author = "Kate Wang"
 author-email = "kate.wang2018@gmail.com"
@@ -17,5 +17,5 @@ requires-python = ">=3.7"
 keywords = "python, scraping, scraper, image, downloader"
 
 [tool.flit.scripts]
-image_dl = "image_dl.image_dl:main"
+imagedl = "image_dl.image_dl:main"
 
