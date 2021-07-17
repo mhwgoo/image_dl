@@ -13,9 +13,9 @@ from lxml import etree
 from urllib.parse import urlparse, urljoin
 from fake_user_agent.main import user_agent
 
-from utils import parse_args, get_url, get_download_dir, update
-from log import logger
-from exceptions import DirectoryAccessError, DirectoryCreateError
+from .utils import parse_args, get_url, get_download_dir, update
+from .log import logger
+from .exceptions import DirectoryAccessError, DirectoryCreateError
 
 
 ua = user_agent()
