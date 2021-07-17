@@ -15,19 +15,19 @@ data.mkdir(parents=True, exist_ok=True)
 
 
 logger = logging.getLogger("image_dl")
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 
-formatter = logging.Formatter(
+file_formatter = logging.Formatter(
     "%(asctime)s - %(pathname)s[line:%(lineno)d] - %(funcName)s - %(levelname)s: %(message)s",
     datefmt="%H:%M:%S",
 )
-
 file_handler = logging.FileHandler(str(data / "image_dl.log"))
 file_handler.setLevel(logging.ERROR)
-file_handler.setFormatter(formatter)
+file_handler.setFormatter(file_formatter)
 
+stream_formatter = logging.Formatter("%(message)s")
 stream_handler = logging.StreamHandler()
-stream_handler.setFormatter(formatter)
+stream_handler.setFormatter(stream_formatter)
 
 
 logger.addHandler(file_handler)
