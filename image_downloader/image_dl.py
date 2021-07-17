@@ -169,6 +169,3 @@ def main():
         download_imgs()
     except KeyboardInterrupt:
         print("\nOpt out by user.")
-
-
-main()
