@@ -6,8 +6,7 @@ import termios
 from array import array
 from fcntl import ioctl
 
-from .log import logger
-
+from log import logger
 
 def handle_resize(signum, frame):
     h, w = array("h", ioctl(sys.stdout, termios.TIOCGWINSZ, "\0" * 8))[:2]
@@ -36,3 +35,7 @@ def update(curr_val, max_val):
     bar_width = term_width - len(percent_str) - len(" ")
     bar = get_bar(percent, bar_width)
     print("\r" + percent_str + " " + bar, end="", flush=True)
+
+
+
+
