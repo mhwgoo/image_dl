@@ -58,7 +58,7 @@ def get_url(url):
 
 def get_download_dir(url, dir_name):
     if dir_name:
-        dir = pathlib.Path(dir_name)
+        dir = pathlib.Path(dir_name)  # dir.absolute(): PosixPath("current folder path/dir_name")
     else:
-        dir = pathlib.Path() / urlparse(url).netloc
+        dir = pathlib.Path(urlparse(url).netloc)
     return dir

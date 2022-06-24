@@ -3,6 +3,7 @@ import os
 import sys
 import re
 import time
+import lxml
 import requests
 import http.client
 import concurrent.futures
@@ -117,18 +118,19 @@ def parse(url, response, formats):
 
 
 def process_dir(dir):
-    if dir.exists():
-        if not os.access(dir, os.W_OK):
-            logger.error("The directory %s can not be accessed.", dir)
-            sys.exit()
-    elif os.access(dir.parent, os.W_OK):
+    # Ask forgiveness, not permission
+    try:
         os.mkdir(dir)
-    else:
-        logger.error("The directory %s can not be created.", dir)
+    except FileExistsError:
+        return
+    except OSError as e:
+        logger.error(str(e))
         sys.exit()
 
 
-def process_img_path(link, dir, formats):
+def process_img_path(dir, formats, link):
+    process_dir(dir)
+
     img_name = "_".join(link.split("/")[-2:])
     if "?" in img_name:
         img_name = img_name.split("?")[0]
@@ -138,16 +140,32 @@ def process_img_path(link, dir, formats):
     return img_path
 
 
-def save(path, link, session):
+def save_img(dir, formats, link, session):
     r = fetch(link, session, stream=True)
+    path = process_img_path(dir, formats, link)
+
     try: 
         with open(path, "wb") as f:  # for stream=True, you have to use with open, otherwise it will generate "write to closed file" error
             for chunk in r:
                 f.write(chunk)
-        logger.debug("Saved file from %s", path)
+        logger.debug("Saved file to %s", path)
     except Exception as e:
         logger.debug(str(e))
 
+# TODO: Transform response.text to md file
+def save_to_markdown(dir, response):
+    lxml_element = etree.HTML(response.text)
+    title = lxml_element.xpath("/html/head/title/text()")[0]
+
+    process_dir(dir)
+    path = os.path.join(dir, title)
+
+    try:
+        with open(path, "wb") as f:
+            f.write(response.content)
+        logger.debug("Saved file to %s", path)
+    except Exception as e:
+        logger.debug(str(e))
 
 
 def download():
@@ -174,27 +192,21 @@ def download():
             lock = Lock()
 
             with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+                update(count, total)
                 for link in img_list:
-                    process_dir(dir)
-                    img_path = process_img_path(link, dir, formats)
-                    executor.submit(save, img_path, link, session)
+                    executor.submit(save_img, dir, formats, link, session)
                     lock.acquire()
                     count += 1
-                    update(count, total)
                     lock.release()
+                    update(count, total)
 
         if args.subparser_name == "html" and args.level:
-            lxml_element = etree.HTML(response.text)
             if args.level == 1:
                 total += 1 
-                process_dir(dir)
-                title = lxml_element.xpath("/html/head/title/text()")[0]
-                html_path = os.path.join(dir, title)
-                f = open(html_path, "wb")
-                f.write(response.content)
+                update(count, total)
+                save_to_markdown(dir, response)
                 count += 1
-                f.close()
-
+                update(count, total)
 
     print("Done!")
     print(f"Downloaded {count} files")
