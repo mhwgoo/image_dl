@@ -17,7 +17,7 @@ def parse_args():
         "url",
         help="a url to download from",
     )
-    parser.add_argument("-d", "--dir", help="directory to save files")
+    parser.add_argument("-d", "--dir", help="name given for creating a new directory in current folder")
 
     # Add sub-command capability that can identify different sub-command names
     sub_parsers = parser.add_subparsers(dest='subparser_name')
@@ -58,7 +58,7 @@ def get_url(url):
 
 def get_download_dir(url, dir_name):
     if dir_name:
-        dl_dir = pathlib.Path(dir_name)
+        dir = pathlib.Path(dir_name)
     else:
-        dl_dir = pathlib.Path() / urlparse(url).netloc
-    return dl_dir
+        dir = pathlib.Path() / urlparse(url).netloc
+    return dir

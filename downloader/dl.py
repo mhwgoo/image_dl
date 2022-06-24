@@ -14,9 +14,12 @@ from fake_user_agent.main import user_agent
 
 ua = user_agent()
 headers = {"User-Agent": ua}
-count = 0
-OP = ["FETCHING", "FETCHING_JS", "PARSING"]
 
+count = 0
+total = 0
+
+OP = ["FETCHING", "FETCHING_JS", "PARSING"]
+base_response = None 
 
 # Support downloading all at once & by chunk
 def fetch(url, session, stream=False):
@@ -38,6 +41,7 @@ def fetch(url, session, stream=False):
             attempt = call_on_error(e, url, attempt, OP[0])
         else:
             if r.ok:
+                logger.debug("%s has fetched successfully", url)
                 return r
 
 
@@ -97,9 +101,7 @@ def parse_imgs(url, response, formats):
         return img_list
 
 
-def parse(url, session, formats):
-    response = fetch(url, session)
-
+def parse(url, response, formats):
     img_list = parse_imgs(url, response.text, formats)
     if not img_list:
         logger.info("No images found in the webpage. Refetching...")
@@ -126,64 +128,86 @@ def process_dir(dir):
         sys.exit()
 
 
+def process_img_path(link, dir, formats):
+    img_name = "_".join(link.split("/")[-2:])
+    if "?" in img_name:
+        img_name = img_name.split("?")[0]
+    if img_name.split(".")[-1] not in formats:
+        img_name = img_name + ".jpg"
+    img_path = os.path.join(dir, img_name)
+    return img_path
+
+
 def save(f, link, session):
     # with session.get(link, headers=headers, stream=True) as r:
     r = fetch(link, session, stream=True)
-    for chunk in r.iter_content():
-        f.write(chunk)
+    for chunk in r.iter_conte(trunk_size=512):
+        if chunk:
+            f.write(chunk)
+
 
 def download():
     args = parse_args()
     url = get_url(args.url)
     dir = get_download_dir(url, args.dir)
 
+    print("Requesting page...\n")
+
     with requests.Session() as session:
+        response = fetch(url, session)
+        global base_response
+        base_response = response
+        global total
+        global count
+
         if args.subparser_name == "image" and args.format:
             formats = args.format
-            t1 = time.time()
+            img_list = parse(url, base_response, formats)
+            total = len(img_list)
 
-            print("Requesting page...\n")
-            img_list = parse(url, session, formats)
-            img_num = len(img_list)
-            print(f"Found {img_num} images:")
+            print(f"Found {total} images:")
 
             lock = Lock()
 
             with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-                for i, link in enumerate(img_list):
+                for link in img_list:
                     process_dir(dir)
-                    img_name = "_".join(link.split("/")[-2:])
-                    if "?" in img_name:
-                        img_name = img_name.split("?")[0]
-                    if img_name.split(".")[-1] not in formats:
-                        img_name = img_name + ".jpg"
-                    img_path = os.path.join(dir, img_name)
-
+                    img_path = process_img_path(link, dir, formats)
                     f = open(img_path, "wb")
                     executor.submit(save, f, link, session)
-                    global count
                     lock.acquire()
                     count += 1
-                    update(count, img_num)
+                    update(count, total)
                     lock.release()
                     f.close()
 
-            print("Done!")
-            print(f"Downloaded {count} images")
-            print(f"Failed: {img_num - count}")
+        if args.subparser_name == "html" and args.level:
+            lxml_element = etree.HTML(response.text)
+            if args.level == 1:
+                total += 1 
+                process_dir(dir)
+                title = lxml_element.xpath("/html/head/title/text()")[0]
+                print(title)
+                html_path = os.path.join(dir, title)
+                f = open(html_path, "wb")
+                f.write(response.content)
+                count += 1
+                f.close
 
-            t2 = time.time()
-            print(f"\nTime Taken: {t2-t1}")
-
-    if args.subparser_name == "html":
-        pass
+    print("Done!")
+    print(f"Downloaded {count} files")
+    print(f"Failed: {total - count}")
 
 
 def main():
     try:
+        t1 = time.time()
         download()
+        t2 = time.time()
+        print(f"\nTime Taken: {t2-t1}")
+
     except KeyboardInterrupt:
-        print("\nOpt out by user.")
+        print("\nCancelled out by user.")
 
 
 if __name__ == "__main__":
