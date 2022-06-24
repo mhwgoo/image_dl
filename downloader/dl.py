@@ -40,7 +40,7 @@ def fetch(url, session, stream=False):
         except Exception as e:
             attempt = call_on_error(e, url, attempt, OP[0])
         else:
-            if r.ok:
+            if r.status_code == 200:  # only a 200 response has a response body
                 logger.debug("%s has fetched successfully", url)
                 return r
 
@@ -97,7 +97,7 @@ def parse_imgs(url, response, formats):
                 img_list[index] = "https:" + img
             if re.match(r"^/[^/].+", img):
                 img_list[index] = urljoin(url, img)
-        img_list = list(filter(None, img_list))
+        img_list = set(filter(None, img_list))  # When None is used as the first argument to the filter function, all elements that are truthy values (gives True if converted to boolean) are extracted.
         return img_list
 
 
@@ -138,12 +138,16 @@ def process_img_path(link, dir, formats):
     return img_path
 
 
-def save(f, link, session):
-    # with session.get(link, headers=headers, stream=True) as r:
+def save(path, link, session):
     r = fetch(link, session, stream=True)
-    for chunk in r.iter_conte(trunk_size=512):
-        if chunk:
-            f.write(chunk)
+    try: 
+        with open(path, "wb") as f:  # for stream=True, you have to use with open, otherwise it will generate "write to closed file" error
+            for chunk in r:
+                f.write(chunk)
+        logger.debug("Saved file from %s", path)
+    except Exception as e:
+        logger.debug(str(e))
+
 
 
 def download():
@@ -173,13 +177,11 @@ def download():
                 for link in img_list:
                     process_dir(dir)
                     img_path = process_img_path(link, dir, formats)
-                    f = open(img_path, "wb")
-                    executor.submit(save, f, link, session)
+                    executor.submit(save, img_path, link, session)
                     lock.acquire()
                     count += 1
                     update(count, total)
                     lock.release()
-                    f.close()
 
         if args.subparser_name == "html" and args.level:
             lxml_element = etree.HTML(response.text)
@@ -187,12 +189,12 @@ def download():
                 total += 1 
                 process_dir(dir)
                 title = lxml_element.xpath("/html/head/title/text()")[0]
-                print(title)
                 html_path = os.path.join(dir, title)
                 f = open(html_path, "wb")
                 f.write(response.content)
                 count += 1
-                f.close
+                f.close()
+
 
     print("Done!")
     print(f"Downloaded {count} files")
@@ -214,10 +216,10 @@ if __name__ == "__main__":
     from args import parse_args, get_url, get_download_dir
     from progressbar import update
     from log import logger
-    main()
 
 else:
     from .args import parse_args, get_url, get_download_dir
     from .progressbar import update
     from .log import logger
 
+main()

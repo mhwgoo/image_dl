@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 
 try:
-    data = Path(os.environ["XDG_DATA_HOME"]) / "resource_dl"
+    data = Path(os.environ["XDG_DATA_HOME"]) / "resource_dl" 
 except KeyError:
     data = Path(os.environ["HOME"]) / ".local" / "share" / "resource_dl"
 
@@ -29,7 +29,7 @@ file_handler.setFormatter(file_formatter)
 stream_formatter = logging.Formatter("%(message)s")
 stream_handler = logging.StreamHandler()
 stream_handler.setFormatter(stream_formatter)
-stream_handler.setLevel(logging.DEBUG)
+stream_handler.setLevel(logging.INFO)
 
 
 logger.addHandler(file_handler)
