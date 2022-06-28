@@ -3,6 +3,7 @@ import os
 import sys
 import re
 import time
+import base64
 import requests
 import http.client
 import concurrent.futures
@@ -16,7 +17,7 @@ ua = user_agent()
 headers = {"User-Agent": ua}
 
 count = 0
-total = 0
+total = 0 
 
 OP = ["FETCHING", "FETCHING_JS", "PARSING"]
 
@@ -165,12 +166,16 @@ def save_img(dir, formats, link, session):
 
 
 # FIXME: br in p, li in ul
-def save_to_markdown(dir, response):
+def save_to_markdown(response):
     html_content = response.text
+    url = response.url
     
     # Extract title
     lxml_element = etree.HTML(html_content)
-    title = lxml_element.xpath("/html/head/title/text()")[0]
+    title = lxml_element.xpath("/html/head/title/text()")[0].replace(" ", "")
+    characters = ["?", ":", "-", "_", "."]
+    for c in characters:
+        title = title.split(c)[0]
 
     # Extract article body
     article = re.search(r'<article.*/article>', html_content, re.S)
@@ -179,15 +184,13 @@ def save_to_markdown(dir, response):
     else:
         replaced = re.sub(r'<\/?strong>|<\/?b>|<br>', "", html_content)
     lxml_replaced = etree.HTML(replaced)
-
-
-    process_dir(dir)
     path = title + ".md"
-    # path = os.path.join(dir, file_name)
 
     try:
         with open(path, "w") as f:
             # Xpath will sort the returned list according the order in the source
+
+            # sentences = lxml_replaced.xpath("//p | //h1 | //h2 | //h3 | //blockquote | //img")
             sentences = lxml_replaced.xpath("//p | //h1 | //h2 | //h3 | //blockquote | //img")
             for s in sentences:
                 tag = s.tag
@@ -202,18 +205,27 @@ def save_to_markdown(dir, response):
                     f.write("\n### " + s.text + "\n")
 
                 # Handle all text of a blockquote node, including that of its br child node
-                if tag == "blockquote" :
+                if tag == "blockquote":
+                    f.write("\n")
                     f.write("> " + s.text + "\n")
                     for i in s.getchildren():
                         f.write("> " + i.tail + "\n")
+                    f.write("\n")
 
-                if tag == "img" and s.getparent().tag != "noscript":
-                    link = s.attrib["src"]
-                    if link.startswith("http"):
-                        f.write("[image link]" + "(" + link + ")" + "\n")
-                    else:
-                        f.write("[image link]" + "("  + s.attrib["data-original"] + ")" + "\n")
+                if tag == "img":
+                    parent = s.getparent()
+                    if parent.tag != "noscript":
+                        try: 
+                            link = s.attrib["src"]
+                        except Exception as e:
+                            continue
+                        else:
+                            if link.startswith("http"):
+                                f.write("\n![image]" + "(" + link + ")" + "\n\n")
+                            else:
+                                f.write("\n![image]" + "("  + s.attrib["data-original"] + ")" + "\n\n")
 
+            f.write("\n---\n原文: " + url)
         logger.debug("Saved file to %s", path)
     except Exception as e:
         logger.debug(str(e))
@@ -223,25 +235,25 @@ def download():
     args = parse_args()
     url = get_url(args.url)
     dir = get_download_dir(url, args.dir)
-
-    print("Requesting page...\n")
+    lock = Lock()
+    global total
+    global count
 
     with requests.Session() as session:
-        response = fetch(url, session)
-        global total
-        global count
 
-        if args.subparser_name == "image" and args.format:
+        print(f"Fetching {url} ...")
+        response = fetch(url, session)
+
+        if args.subparser_name == "image":
             formats = args.format
+
+            print(f"Parsing {url} ...")
             img_list = parse(url, response, formats)
             total = len(img_list)
-
-            print(f"Found {total} images:")
-
-            lock = Lock()
-
+            print(f"Found {total} files")
+            print("Saving files ...")
+            update(count, total)
             with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-                update(count, total)
                 for link in img_list:
                     executor.submit(save_img, dir, formats, link, session)
                     lock.acquire()
@@ -249,28 +261,27 @@ def download():
                     lock.release()
                     update(count, total)
 
-        if args.subparser_name == "html" and args.level:
+        if args.subparser_name == "html":
             if args.level == 1:
+                print(f"Parsing {url} ...")
                 total += 1 
+                print(f"Found {total} files")
+                print("Saving files ...")
                 update(count, total)
-                save_to_markdown(dir, response)
+                save_to_markdown(response)
                 count += 1
                 update(count, total)
+
             if args.level == 2:
                 link_list = parse_links(url, response)
-
                 total = len(link_list)
-
-                print(f"Found {total} images:")
-
-                lock = Lock()
+                print(f"Found {total} files")
 
                 # FIXME: multi-thread fetch and save
                 with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-                    update(count, total)
                     for link in link_list:
                         response = fetch(link, session)
-                        executor.submit(save_to_markdown, dir, response)
+                        executor.submit(save_to_markdown, response)
                         lock.acquire()
                         count += 1
                         lock.release()
