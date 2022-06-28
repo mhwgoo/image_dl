@@ -3,7 +3,6 @@ import os
 import sys
 import re
 import time
-import base64
 import requests
 import http.client
 import concurrent.futures
@@ -12,14 +11,14 @@ from lxml import etree
 from urllib.parse import urlparse, urljoin
 from fake_user_agent.main import user_agent
 
-
 ua = user_agent()
 headers = {"User-Agent": ua}
 
 count = 0
 total = 0 
-
-OP = ["FETCHING", "FETCHING_JS", "PARSING"]
+ops = ["FETCHING", "FETCHING_JS", "PARSING", "SAVING"]
+base_page_text ="" 
+base_page_url = ""
 
 # Support downloading all at once & by chunk
 def fetch(url, session, stream=False):
@@ -30,15 +29,15 @@ def fetch(url, session, stream=False):
         try:
             r = session.get(url, timeout=9.05, stream=stream)
         except requests.exceptions.HTTPError as e:
-            attempt = call_on_error(e, url, attempt, OP[0])
+            attempt = call_on_error(e, url, attempt, ops[0])
         except requests.exceptions.ConnectTimeout as e:
-            attempt = call_on_error(e, url, attempt, OP[0])
+            attempt = call_on_error(e, url, attempt, ops[0])
         except requests.exceptions.ConnectionError as e:
-            attempt = call_on_error(e, url, attempt, OP[0])
+            attempt = call_on_error(e, url, attempt, ops[0])
         except requests.exceptions.ReadTimeout as e:
-            attempt = call_on_error(e, url, attempt, OP[0])
+            attempt = call_on_error(e, url, attempt, ops[0])
         except Exception as e:
-            attempt = call_on_error(e, url, attempt, OP[0])
+            attempt = call_on_error(e, url, attempt, ops[0])
         else:
             if r.status_code == 200:  # only a 200 response has a response body
                 logger.debug("%s has fetched successfully", url)
@@ -70,29 +69,28 @@ def fetch_js(url):
         page_source = driver.page_source
         driver.quit()
     except http.client.RemoteDisconnected as e:
-        attempt = call_on_error(e, url, attempt, OP[1])
+        attempt = call_on_error(e, url, attempt, ops[1])
     except Exception as e:
-        attempt = call_on_error(e, url, attempt, OP[1])
+        attempt = call_on_error(e, url, attempt, ops[1])
     else:
         return page_source 
 
 
-def parse_links(url, response):
-    html_content = response.text
-    lxml_element = etree.HTML(html_content)
+def parse_links():
+    lxml_element = etree.HTML(base_page_text)
     link_nodes = lxml_element.xpath("//ul/li/a")
     links = []
     for l in link_nodes:
         loc = l.attrib["href"] 
         if not loc.startswith("http"):
-            loc = url + loc
+            loc = base_page_url + loc
         links.append(loc) 
     return links
 
 
-def parse_imgs(url, response, formats):
+def parse_imgs(formats):
     img_list = []
-    lxml_element = etree.HTML(response)
+    lxml_element = etree.HTML(base_page_text)
     img_links = lxml_element.xpath("//img/@src")
     if img_links:
         for link in img_links:
@@ -109,17 +107,19 @@ def parse_imgs(url, response, formats):
             if re.match(r"^//.+", img):
                 img_list[index] = "https:" + img
             if re.match(r"^/[^/].+", img):
-                img_list[index] = urljoin(url, img)
+                img_list[index] = urljoin(base_page_url, img)
         img_list = set(filter(None, img_list))  # When None is used as the first argument to the filter function, all elements that are truthy values (gives True if converted to boolean) are extracted.
         return img_list
 
 
-def parse(url, response, formats):
-    img_list = parse_imgs(url, response.text, formats)
+def parse(formats):
+    img_list = parse_imgs(formats)
     if not img_list:
         logger.info("No images found in the webpage. Refetching...")
-        r = fetch_js(url)
-        imgs = parse_imgs(url, r, formats)
+        r = fetch_js(base_page_url)
+        global base_page_text
+        base_page_text = r
+        imgs = parse_imgs(formats)
         if not imgs:
             logger.info("No images found also by reading js in the webpage.")
             sys.exit()
@@ -152,7 +152,7 @@ def process_img_path(dir, formats, link):
     return img_path
 
 
-def save_img(dir, formats, link, session):
+def save_img(session, link, dir, formats):
     r = fetch(link, session, stream=True)
     path = process_img_path(dir, formats, link)
 
@@ -165,26 +165,33 @@ def save_img(dir, formats, link, session):
         logger.debug(str(e))
 
 
-# FIXME: br in p, li in ul
-def save_to_markdown(response):
-    html_content = response.text
-    url = response.url
-    
+def save_to_markdown(session, link, dir=None, level=1):
+    text = base_page_text
+
+    if level == 2:
+        r = fetch(link, session)
+        text = r.text
+        process_dir(dir)
+
     # Extract title
-    lxml_element = etree.HTML(html_content)
-    title = lxml_element.xpath("/html/head/title/text()")[0].replace(" ", "")
+    lxml_element = etree.HTML(text)
+    title = lxml_element.xpath("/html/head/title/text()")[0].replace(" ", "").replace("'", "\'")
     characters = ["?", ":", "-", "_", "."]
     for c in characters:
         title = title.split(c)[0]
 
+    # Create file path
+    path = title + ".md"
+    if dir is not None:
+        path = os.path.join(dir, path)
+
     # Extract article body
-    article = re.search(r'<article.*/article>', html_content, re.S)
+    article = re.search(r'<article.*/article>', text, re.S)
     if article:
         replaced = re.sub(r'<\/?strong>|<\/?b>|<br>', "", article.group())
     else:
-        replaced = re.sub(r'<\/?strong>|<\/?b>|<br>', "", html_content)
+        replaced = re.sub(r'<\/?strong>|<\/?b>|<br>', "", text)
     lxml_replaced = etree.HTML(replaced)
-    path = title + ".md"
 
     try:
         with open(path, "w") as f:
@@ -216,16 +223,16 @@ def save_to_markdown(response):
                     parent = s.getparent()
                     if parent.tag != "noscript":
                         try: 
-                            link = s.attrib["src"]
+                            loc = s.attrib["src"]
                         except Exception as e:
                             continue
                         else:
-                            if link.startswith("http"):
-                                f.write("\n![image]" + "(" + link + ")" + "\n\n")
+                            if loc.startswith("http"):
+                                f.write("\n![image]" + "(" + loc + ")" + "\n\n")
                             else:
                                 f.write("\n![image]" + "("  + s.attrib["data-original"] + ")" + "\n\n")
 
-            f.write("\n---\n原文: " + url)
+            f.write("\n---\n原文: " + link)
         logger.debug("Saved file to %s", path)
     except Exception as e:
         logger.debug(str(e))
@@ -238,58 +245,64 @@ def download():
     lock = Lock()
     global total
     global count
+    global base_page_text
+    global base_page_url
 
     with requests.Session() as session:
 
-        print(f"Fetching {url} ...")
+        print(f"{ops[0]} {url} ...")
         response = fetch(url, session)
+        base_page_text = response.text
+        base_page_url = response.url
 
         if args.subparser_name == "image":
             formats = args.format
 
-            print(f"Parsing {url} ...")
-            img_list = parse(url, response, formats)
+            print(f"{ops[2]} {url} ...")
+            img_list = parse(formats)
             total = len(img_list)
-            print(f"Found {total} files")
-            print("Saving files ...")
+            print(f"FOUND {total} files")
+            print(f"{ops[3]} files ...")
             update(count, total)
             with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
                 for link in img_list:
-                    executor.submit(save_img, dir, formats, link, session)
+                    executor.submit(save_img, session, link, dir, formats)
                     lock.acquire()
                     count += 1
                     lock.release()
                     update(count, total)
 
         if args.subparser_name == "html":
-            if args.level == 1:
-                print(f"Parsing {url} ...")
+            level = int(args.level)
+
+            if level == 1:
+                print(f"{ops[2]} {url} ...")
                 total += 1 
-                print(f"Found {total} files")
-                print("Saving files ...")
+                print(f"FOUND {total} files")
+                print(f"{ops[3]} files ...")
                 update(count, total)
-                save_to_markdown(response)
+                save_to_markdown(session, base_page_url)
                 count += 1
                 update(count, total)
 
-            if args.level == 2:
-                link_list = parse_links(url, response)
+            if level == 2:
+                print(f"{ops[2]} {url} ...")
+                link_list = parse_links()
                 total = len(link_list)
-                print(f"Found {total} files")
-
-                # FIXME: multi-thread fetch and save
+                print(f"FOUND {total} files")
+                print(f"{ops[3]} files ...")
+                update(count, total)
                 with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
                     for link in link_list:
-                        response = fetch(link, session)
-                        executor.submit(save_to_markdown, response)
+                        executor.submit(save_to_markdown, session, link, dir, level)
                         lock.acquire()
                         count += 1
                         lock.release()
                         update(count, total)
 
-    print("Done!")
-    print(f"Downloaded {count} files")
-    print(f"Failed: {total - count}")
+    print("DONE!")
+    print(f"DOWNLOADED {count} files")
+    print(f"FAILED: {total - count}")
 
 
 def main():
