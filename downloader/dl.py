@@ -82,9 +82,11 @@ def parse_links():
     links = []
     for l in link_nodes:
         loc = l.attrib["href"] 
+        name = l.text
         if not loc.startswith("http"):
             loc = base_page_url + loc
-        links.append(loc) 
+        pair = (name, loc)
+        links.append(pair) 
     return links
 
 
@@ -165,45 +167,56 @@ def save_img(session, link, dir, formats):
         logger.debug(str(e))
 
 
-def save_to_markdown(session, link, dir=None, level=1):
+def save_to_markdown(session, link, dir=None, level=1, title=None):
+    # Get nodes 
     text = base_page_text
-
     if level == 2:
         r = fetch(link, session)
         text = r.text
-        process_dir(dir)
-
-    # Extract title
     lxml_element = etree.HTML(text)
-    title = lxml_element.xpath("/html/head/title/text()")[0].replace(" ", "").replace("'", "\'")
-    characters = ["?", ":", "-", "_", "."]
-    for c in characters:
-        title = title.split(c)[0]
+    
+    # Extract title
+    if title is None:
+        # FIXME not always right 
+        title = text.split("<title>")[1].split("</title>")[0]
+    title = title.split("?")[0]
 
     # Create file path
     path = title + ".md"
     if dir is not None:
+        process_dir(dir)
         path = os.path.join(dir, path)
 
-    # Extract article body
+    # Narrow down to article nodes if any
     article = re.search(r'<article.*/article>', text, re.S)
     if article:
-        replaced = re.sub(r'<\/?strong>|<\/?b>|<br>', "", article.group())
-    else:
-        replaced = re.sub(r'<\/?strong>|<\/?b>|<br>', "", text)
-    lxml_replaced = etree.HTML(replaced)
+        # replaced = re.sub(r'<\/?strong>|<\/?b>', "", article.group())
+        lxml_element = etree.HTML(article.group())
+    # replaced = re.sub(r'<\/?strong>|<\/?b>', "", text)
 
+    # Write to file
     try:
         with open(path, "w") as f:
             # Xpath will sort the returned list according the order in the source
-
-            # sentences = lxml_replaced.xpath("//p | //h1 | //h2 | //h3 | //blockquote | //img")
-            sentences = lxml_replaced.xpath("//p | //h1 | //h2 | //h3 | //blockquote | //img")
+            sentences = lxml_element.xpath("//p | //h1 | //h2 | //h3 | //blockquote | //img | //hr")
             for s in sentences:
                 tag = s.tag
+
+                # FIXME How to get descendents, siblings, etc, i.e. how to inspect a node
                 if tag == "p": 
                     if s.text is not None:
-                        f.write(s.text + "\n")
+                        f.write(s.text)
+                    children = s.getchildren() 
+                    if children:
+                        for i in children:
+                            if i.tag == "br":
+                                f.write(i.tail + "\n")
+                            if i.tag == "font" or i.tag == "strong" or i.tag == "b" or i.tag == "em":
+                                f.write(i.text)
+                            if i.tag == "img":
+                                continue
+                    f.write("\n")
+
                 if tag == "h1": 
                     f.write("# " + s.text + "\n")
                 if tag == "h2":
@@ -231,6 +244,8 @@ def save_to_markdown(session, link, dir=None, level=1):
                                 f.write("\n![image]" + "(" + loc + ")" + "\n\n")
                             else:
                                 f.write("\n![image]" + "("  + s.attrib["data-original"] + ")" + "\n\n")
+                if tag == "hr":
+                    f.write("\n---\n")
 
             f.write("\n---\n原文: " + link)
         logger.debug("Saved file to %s", path)
@@ -293,8 +308,10 @@ def download():
                 print(f"{ops[3]} files ...")
                 update(count, total)
                 with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-                    for link in link_list:
-                        executor.submit(save_to_markdown, session, link, dir, level)
+                    for i in link_list:
+                        title = i[0]
+                        link = i[1]
+                        executor.submit(save_to_markdown, session, link, dir, level, title)
                         lock.acquire()
                         count += 1
                         lock.release()
