@@ -77,8 +77,8 @@ def fetch_js(url):
 
 
 def parse_links():
-    lxml_element = etree.HTML(base_page_text)
-    link_nodes = lxml_element.xpath("//ul/li/a")
+    tree = etree.HTML(base_page_text)
+    link_nodes = tree.xpath("//ul/li/a")
     links = []
     for l in link_nodes:
         loc = l.attrib["href"] 
@@ -92,13 +92,13 @@ def parse_links():
 
 def parse_imgs(formats):
     img_list = []
-    lxml_element = etree.HTML(base_page_text)
-    img_links = lxml_element.xpath("//img/@src")
+    tree = etree.HTML(base_page_text)
+    img_links = tree.xpath("//img/@src")
     if img_links:
         for link in img_links:
             if urlparse(link).path.split(".")[-1] in formats:
                 img_list.append(link)
-    a_links = lxml_element.xpath("//a/@href | //a/@data-original")
+    a_links = tree.xpath("//a/@href | //a/@data-original")
     if a_links:
         for link in a_links:
             if urlparse(link).path.split(".")[-1] in formats:
@@ -168,84 +168,75 @@ def save_img(session, link, dir, formats):
 
 
 def save_to_markdown(session, link, dir=None, level=1, title=None):
-    # Get nodes 
-    text = base_page_text
-    if level == 2:
+    # Get page html string 
+    if level == 1:
+        text = base_page_text
+    else:
         r = fetch(link, session)
         text = r.text
-    lxml_element = etree.HTML(text)
+    text = text.replace("\n", " ").replace("  ", " ").replace("&nbsp;", "")
     
-    # Extract title
-    if title is None:
-        # FIXME not always right 
-        title = text.split("<title>")[1].split("</title>")[0]
-    title = title.split("?")[0]
-
     # Create file path
+    if not title:
+        match = re.search(r'<title[^>]*>(.*?)(?=</title>)', text, re.S)
+        if match:
+            title = match.group().split(">")[1]
+        else:
+            title = "untitled"
+
+    title = title.replace(" ", "_").replace("__", "_")
     path = title + ".md"
-    if dir is not None:
+    if dir:
         process_dir(dir)
         path = os.path.join(dir, path)
 
-    # Narrow down to article nodes if any
-    article = re.search(r'<article.*/article>', text, re.S)
+    # Narrow down to article node if any
+    article = re.search(r'<article(.*?)</article>', text, re.S)
     if article:
-        # replaced = re.sub(r'<\/?strong>|<\/?b>', "", article.group())
-        lxml_element = etree.HTML(article.group())
-    # replaced = re.sub(r'<\/?strong>|<\/?b>', "", text)
+        tree = etree.HTML(article.group())
+    else:
+        tree = etree.HTML(text)
 
     # Write to file
     try:
         with open(path, "w") as f:
             # Xpath will sort the returned list according the order in the source
-            sentences = lxml_element.xpath("//p | //h1 | //h2 | //h3 | //blockquote | //img | //hr")
+            sentences = tree.xpath("//p[not(img)] | //h1 | //h2 | //h3 | //blockquote | //img[not(parent::noscript)]")
             for s in sentences:
                 tag = s.tag
-
-                # FIXME How to get descendents, siblings, etc, i.e. how to inspect a node
                 if tag == "p": 
-                    if s.text is not None:
-                        f.write(s.text)
-                    children = s.getchildren() 
-                    if children:
-                        for i in children:
-                            if i.tag == "br":
-                                f.write(i.tail + "\n")
-                            if i.tag == "font" or i.tag == "strong" or i.tag == "b" or i.tag == "em":
-                                f.write(i.text)
-                            if i.tag == "img":
-                                continue
+                    for i in s.itertext():
+                            f.write(i)
                     f.write("\n")
-
                 if tag == "h1": 
-                    f.write("# " + s.text + "\n")
+                    f.write("# ")
+                    for i in s.itertext():
+                        f.write(i)
+                    f.write("\n")
                 if tag == "h2":
-                    f.write("\n## " + s.text + "\n")
-                if tag== "h3":
-                    f.write("\n### " + s.text + "\n")
-
-                # Handle all text of a blockquote node, including that of its br child node
+                    f.write("\n## ")
+                    for i in s.itertext():
+                        f.write(i)
+                    f.write("\n")
+                if tag == "h3":
+                    f.write("\n### ")
+                    for i in s.itertext():
+                        f.write(i)
+                    f.write("\n")
                 if tag == "blockquote":
                     f.write("\n")
-                    f.write("> " + s.text + "\n")
-                    for i in s.getchildren():
-                        f.write("> " + i.tail + "\n")
+                    for i in s.itertext():
+                        f.write("> " + i + "\n")
                     f.write("\n")
-
                 if tag == "img":
-                    parent = s.getparent()
-                    if parent.tag != "noscript":
-                        try: 
-                            loc = s.attrib["src"]
-                        except Exception as e:
-                            continue
+                    if "data-original" in s.keys():
+                        f.write("\n![image]" + "(" + s.attrib["data-original"] + ")" + "\n\n")
+                    elif "src" in s.keys():
+                        loc = s.attrib["src"]
+                        if loc.startswith("http"):
+                            f.write("\n![image]" + "(" + loc + ")" + "\n\n")
                         else:
-                            if loc.startswith("http"):
-                                f.write("\n![image]" + "(" + loc + ")" + "\n\n")
-                            else:
-                                f.write("\n![image]" + "("  + s.attrib["data-original"] + ")" + "\n\n")
-                if tag == "hr":
-                    f.write("\n---\n")
+                            f.write("\n![image]" + "(" + link + loc + ")" + "\n\n")
 
             f.write("\n---\n原文: " + link)
         logger.debug("Saved file to %s", path)
