@@ -11,6 +11,7 @@ from lxml import etree
 from urllib.parse import urlparse, urljoin
 from fake_user_agent.main import user_agent
 
+
 ua = user_agent()
 headers = {"User-Agent": ua}
 
@@ -174,7 +175,9 @@ def save_to_markdown(session, link, dir=None, level=1, title=None):
     else:
         r = fetch(link, session)
         text = r.text
-    text = text.replace("\n", " ").replace("  ", " ").replace("&nbsp;", "")
+
+    # This line is only for the friends scripts, whose texts have strange strings as below: 
+    # text = text.replace("\n", " ").replace("  ", " ").replace("&nbsp;", "").replace("&#146;", "'").replace("&#151;", "-").replace("&#133;", "...").replace("&#145;", "'")
     
     # Create file path
     if not title:
@@ -183,8 +186,14 @@ def save_to_markdown(session, link, dir=None, level=1, title=None):
             title = match.group().split(">")[1]
         else:
             title = "untitled"
+  
+    # Transform Chiness punctuation marks to english ones, for better file naming and terminal displaying
+    # The syntax only allows the key in the dictionary to be one character long
+    trans_pattern = str.maketrans({"’": "'", "—": "-", "…": "...", "‘": "'", "：": ":", "，": ",", "？": "?"})
+    title = title.translate(trans_pattern)
+    # Get rid of weird formats
+    title = title.replace(" ", "_").replace("__", "_").split("?")[0]
 
-    title = title.replace(" ", "_").replace("__", "_")
     path = title + ".md"
     if dir:
         process_dir(dir)
@@ -201,18 +210,27 @@ def save_to_markdown(session, link, dir=None, level=1, title=None):
     try:
         with open(path, "w") as f:
             # Xpath will sort the returned list according the order in the source
-            sentences = tree.xpath("//p[not(img)] | //h1 | //h2 | //h3 | //blockquote | //img[not(parent::noscript)]")
+            sentences = tree.xpath("//p[not(img)] | //h1 | //h2 | //h3 | //blockquote | //img[not(parent::noscript)] | //hr")
             for s in sentences:
                 tag = s.tag
                 if tag == "p": 
-                    for i in s.itertext():
+
+                    """ Browser friendly for the scripts of friends TV series 
+                    for index, i in enumerate(s.itertext()):
+                        if index == 0:
+                            f.write("**" + i + "**")
+                        else:
                             f.write(i)
+                     """
+
+                    for i in s.itertext():
+                        f.write(i)
                     f.write("\n")
                 if tag == "h1": 
                     f.write("# ")
                     for i in s.itertext():
                         f.write(i)
-                    f.write("\n")
+                    f.write("\n\n")
                 if tag == "h2":
                     f.write("\n## ")
                     for i in s.itertext():
@@ -237,8 +255,10 @@ def save_to_markdown(session, link, dir=None, level=1, title=None):
                             f.write("\n![image]" + "(" + loc + ")" + "\n\n")
                         else:
                             f.write("\n![image]" + "(" + link + loc + ")" + "\n\n")
+                if tag == "hr":
+                    f.write("---\n\n")
 
-            f.write("\n---\n原文: " + link)
+            f.write("\n---\nSource: " + link)
         logger.debug("Saved file to %s", path)
     except Exception as e:
         logger.debug(str(e))
@@ -247,7 +267,6 @@ def save_to_markdown(session, link, dir=None, level=1, title=None):
 def download():
     args = parse_args()
     url = get_url(args.url)
-    dir = get_download_dir(url, args.dir)
     lock = Lock()
     global total
     global count
@@ -263,6 +282,7 @@ def download():
 
         if args.subparser_name == "image":
             formats = args.format
+            dir = get_download_dir(url, args.dir)[1]
 
             print(f"{ops[2]} {url} ...")
             img_list = parse(formats)
@@ -280,6 +300,7 @@ def download():
 
         if args.subparser_name == "html":
             level = int(args.level)
+            check, dir = get_download_dir(url, args.dir)
 
             if level == 1:
                 print(f"{ops[2]} {url} ...")
@@ -287,7 +308,10 @@ def download():
                 print(f"FOUND {total} files")
                 print(f"{ops[3]} files ...")
                 update(count, total)
-                save_to_markdown(session, base_page_url)
+                if check:
+                    save_to_markdown(session, base_page_url, dir)
+                else:
+                    save_to_markdown(session, base_page_url)
                 count += 1
                 update(count, total)
 
