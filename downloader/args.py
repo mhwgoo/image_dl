@@ -4,7 +4,7 @@ import sys
 import re
 import pathlib
 import argparse
-from urllib.parse import urlparse
+from urllib.parse import urlparse, unquote
 
 
 def parse_args():
@@ -76,9 +76,9 @@ def parse_args():
 
 def get_url(url):
     if re.match(r"^[a-zA-z]+://", url):
-        return url
+        return unquote(url) 
     else:
-        return "https://" + url
+        return unquote("https://" + url)
 
 
 def get_download_dir(url, dir_name):

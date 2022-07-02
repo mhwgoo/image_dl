@@ -278,7 +278,7 @@ def download():
         print(f"{ops[0]} {url} ...")
         response = fetch(url, session)
         base_page_text = response.text
-        base_page_url = response.url
+        base_page_url = url
 
         if args.subparser_name == "image":
             formats = args.format
