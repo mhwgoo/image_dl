@@ -31,6 +31,19 @@ def parse_args():
         default=["jpg", "png", "gif", "svg", "jpeg", "webp"],
         help="seperate multiple image format with space",
     )
+    parser_image.add_argument(
+        "--width",
+        type=int,
+        default=-1,
+        help="height of the image"
+    )
+    parser_image.add_argument(
+        "--height",
+        type=int,
+        default=-1,
+        help="width of the image"
+    )
+ 
     # Add optional argument dir
     parser_image.add_argument(
             "-d", 

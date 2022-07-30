@@ -9,6 +9,7 @@ import concurrent.futures
 from threading import Lock
 from lxml import etree
 from urllib.parse import urlparse, urljoin
+# from functools import wraps
 from fake_user_agent.main import user_agent
 
 
@@ -40,9 +41,9 @@ def fetch(url, session, stream=False):
         except Exception as e:
             attempt = call_on_error(e, url, attempt, ops[0])
         else:
-            if r.status_code == 200:  # only a 200 response has a response body
-                logger.debug("%s has fetched successfully", url)
-                return r
+            if r.status_code != 200:  # only a 200 response has a response body
+                attempt = call_on_error(r.status_code, url, attempt, ops[0])
+            return r
 
 
 def call_on_error(error, url, attempt, op):
@@ -90,7 +91,7 @@ def parse_links():
         links.append(pair) 
     return links
 
-
+# FIXME 
 def parse_imgs(formats):
     img_list = []
     tree = etree.HTML(base_page_text)
@@ -114,7 +115,7 @@ def parse_imgs(formats):
         img_list = set(filter(None, img_list))  # When None is used as the first argument to the filter function, all elements that are truthy values (gives True if converted to boolean) are extracted.
         return img_list
 
-
+# FIXME
 def parse(formats):
     img_list = parse_imgs(formats)
     if not img_list:
@@ -191,8 +192,10 @@ def save_to_markdown(session, link, dir=None, level=1, title=None):
     # The syntax only allows the key in the dictionary to be one character long
     trans_pattern = str.maketrans({"’": "'", "—": "-", "…": "...", "‘": "'", "：": ":", "，": ",", "？": "?"})
     title = title.translate(trans_pattern)
-    # Get rid of weird formats
-    title = title.replace(" ", "_").replace("__", "_").split("?")[0]
+    # Get rid of symbols
+    title = title.replace(",", "").replace(" ", "_").replace("__", "_").split("?")[0].split(":")[0].strip('"').title()
+    if title[0] == "'" and title[-1] == "'":
+        title = title[1:-1]
 
     path = title + ".md"
     if dir:
@@ -210,7 +213,7 @@ def save_to_markdown(session, link, dir=None, level=1, title=None):
     try:
         with open(path, "w") as f:
             # Xpath will sort the returned list according the order in the source
-            sentences = tree.xpath("//p[not(img)] | //h1 | //h2 | //h3 | //blockquote | //img[not(parent::noscript)] | //hr")
+            sentences = tree.xpath("//p[not(img) and not(parent::blockquote)] | //h1 | //h2 | //h3 | //blockquote[not(parent::aside)] | //img[not(parent::noscript) and not(ancestor::aside) and not(ancestor::span)] | //hr")
             for s in sentences:
                 tag = s.tag
                 if tag == "p": 
@@ -225,36 +228,36 @@ def save_to_markdown(session, link, dir=None, level=1, title=None):
 
                     for i in s.itertext():
                         f.write(i)
-                    f.write("\n")
+                    f.write("\n\n")
                 if tag == "h1": 
                     f.write("# ")
                     for i in s.itertext():
                         f.write(i)
                     f.write("\n\n")
                 if tag == "h2":
-                    f.write("\n## ")
+                    f.write("## ")
                     for i in s.itertext():
                         f.write(i)
                     f.write("\n")
                 if tag == "h3":
-                    f.write("\n### ")
+                    f.write("### ")
                     for i in s.itertext():
                         f.write(i)
                     f.write("\n")
                 if tag == "blockquote":
-                    f.write("\n")
                     for i in s.itertext():
-                        f.write("> " + i + "\n")
+                        if i != " ":
+                            f.write("> " + i + "\n")
                     f.write("\n")
                 if tag == "img":
                     if "data-original" in s.keys():
-                        f.write("\n![image]" + "(" + s.attrib["data-original"] + ")" + "\n\n")
+                        f.write("![image]" + "(" + s.attrib["data-original"] + ")" + "\n\n")
                     elif "src" in s.keys():
                         loc = s.attrib["src"]
                         if loc.startswith("http"):
-                            f.write("\n![image]" + "(" + loc + ")" + "\n\n")
+                            f.write("![image]" + "(" + loc + ")" + "\n\n")
                         else:
-                            f.write("\n![image]" + "(" + link + loc + ")" + "\n\n")
+                            f.write("![image]" + "(" + link + loc + ")" + "\n\n")
                 if tag == "hr":
                     f.write("---\n\n")
 
@@ -280,11 +283,14 @@ def download():
         base_page_text = response.text
         base_page_url = url
 
+        # FIXME Pass args Namespace object rather than format list, for better extensibility and less memory 
         if args.subparser_name == "image":
             formats = args.format
             dir = get_download_dir(url, args.dir)[1]
 
             print(f"{ops[2]} {url} ...")
+            
+            # FIXME
             img_list = parse(formats)
             total = len(img_list)
             print(f"FOUND {total} files")
@@ -337,13 +343,21 @@ def download():
     print(f"FAILED: {total - count}")
 
 
+def timer(func):
+    # @wraps(func)
+    def wrapper(*args, **kwargs):
+        start_at = time.time()
+        f = func(*args, **kwargs)
+        time_taken = time.time() - start_at
+        print("Time taken: {} seconds".format(time_taken))
+        return f
+
+    return wrapper
+
+@timer
 def main():
     try:
-        t1 = time.time()
         download()
-        t2 = time.time()
-        print(f"\nTime Taken: {t2-t1}")
-
     except KeyboardInterrupt:
         print("\nCancelled out by user.")
 
